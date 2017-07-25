@@ -1,5 +1,9 @@
 # stock bot
 
+# Install
+
+`npm i`
+
 # Setup
 
 1. Go to [https://www.alphavantage.co/](https://www.alphavantage.co/) and get a
