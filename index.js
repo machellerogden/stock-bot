@@ -24,7 +24,7 @@ var Alexa = require('alexa-sdk');
 
 exports.handler = function(event, context, callback) {
     var alexa = Alexa.handler(event, context);
-    //alexa.appId = secrets.appid;
+    //alexa.appId = secrets.appId;
     alexa.resources = languageStrings;
     alexa.registerHandlers(handlers);
     alexa.execute();
