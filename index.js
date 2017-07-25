@@ -1,69 +1,129 @@
 'use strict';
-
-const buildResponse = require('./lib/buildResponse');
-const buildSpeechletResponse = require('./lib/buildSpeechletResponse');
-const onSessionStarted = require('./lib/onSessionStarted');
-const onSessionEnded = require('./lib/onSessionEnded');
-const intentMap = require('./lib/intent');
-const getWelcomeResponse = require('./lib/getWelcomeResponse');
-const _ = require('lodash');
 const secrets = require('./secrets');
+const _ = require('lodash');
+const axios = require('axios');
+const request = axios.create({
+    headers: {
+        'Content-Type': 'application/json'
+    }
+});
 
-exports.handler = handler;
+var languageStrings = {
+    'en': {
+        'translation': {
+            'WELCOME' : "Welcome to Stock Bot.",
+            'HELP'    : "I cannot help you yet.",
+            'ABOUT'   : "Stock Bot will give you realtime stock prices for NASDAQ ticker symbols.",
+            'STOP'    : "Thanks for using Stock Bot."
+        }
+    }
+    // , 'de-DE': { 'translation' : { 'TITLE'   : "Local Helfer etc." } }
+};
 
-function handler(event, context, callback) {
-    console.log('@handler - event object:', JSON.stringify(event));
-    console.log('@handler - context object:', JSON.stringify(context));
+var Alexa = require('alexa-sdk');
 
-    function buildResponseCallback(options) {
-        const sessionAttributes = options.sessionAttributes;
-        const cardTitle = options.cardTitle;
-        const cardText = options.cardText;
-        const speechOutput = options.speechOutput;
-        const repromptText = options.repromptText;
-        const shouldEndSession = options.shouldEndSession;
-        const speechletResponse = buildSpeechletResponse({ cardTitle, cardText, speechOutput, repromptText, shouldEndSession });
-        console.log(`buildResponseCallback sessionAttributes=${sessionAttributes} speechletResponse=${speechletResponse}`);
-        callback(null, buildResponse({ sessionAttributes, speechletResponse }));
+exports.handler = function(event, context, callback) {
+    var alexa = Alexa.handler(event, context);
+    //alexa.appId = secrets.appid;
+    alexa.resources = languageStrings;
+    alexa.registerHandlers(handlers);
+    alexa.execute();
+};
+
+var handlers = {
+    'LaunchRequest': function () {
+        var say = this.t('WELCOME') + ' ' + this.t('HELP');
+        this.emit(':ask', say, say);
+    },
+
+    'AboutIntent': function () {
+        this.emit(':tell', this.t('ABOUT'));
+    },
+
+    'CurrentPriceFromSymbol': function () {
+        const context = this;
+        processAttrs({ context })
+            .then(getTimeSeriesFromAV)
+            .then(extractPrice)
+            .then((payload) => {
+                const closeprice = _.result(payload, 'data.closeprice', false);
+                if (_.isFinite(+closeprice)) {
+                    let price = Math.round(closeprice * 100) / 100;
+                    let symbol = _.result(payload, 'data.symbol');
+                    let say = `Current price for <say-as interpret-as="spell-out">${symbol}</say-as> is \$${price}.`;
+                    this.emit(':tell', say);
+                } else {
+                    throw new Error('@getCurrentPriceFromSymbol - invalid price value: ' + closeprice);
+                }
+            })
+            .catch((err) => {
+                console.error('@CurrentPriceFromSymbol handler - error:', err);
+                let say = "Sorry, I'm unable to find a price for that symbol.";
+                this.emit(':tell', say);
+            });
+    },
+
+    'AMAZON.NoIntent': function () {
+        this.emit('AMAZON.StopIntent');
+    },
+    'AMAZON.HelpIntent': function () {
+        this.emit(':ask', this.t('HELP'));
+    },
+    'AMAZON.CancelIntent': function () {
+        this.emit(':tell', this.t('STOP'));
+    },
+    'AMAZON.StopIntent': function () {
+        this.emit(':tell', this.t('STOP'));
     }
 
-    try {
-        console.log(`event.session.application.applicationId=${event.session.application.applicationId}`);
+};
 
-        if (secrets.appid && event.session.application.applicationId !== secrets.appid) {
-            return callback('Invalid Application ID');
-        }
-
-        if (event.session.new) {
-            onSessionStarted({ requestId: event.request.requestId }, event.session);
-        }
-
-        if (event.request.type === 'LaunchRequest') {
-            console.log(`LaunchRequest requestId=${event.request.requestId}, sessionId=${event.session.sessionId}`);
-
-            getWelcomeResponse(buildResponseCallback);
-
-        } else if (event.request.type === 'IntentRequest') {
-            const intent = event.request.intent;
-            let session = event.session;
-            let intentName = intent.name;
-
-            console.log(`IntentRequest requestId=${event.request.requestId}, sessionId=${event.session.sessionId} intentName=${intentName} intentMap[intentName]=${intentMap[intentName]}`);
-
-            try {
-                intentMap[intentName]({ intent, session }, buildResponseCallback);
-            } catch (err) {
-                console.error('Invalid intent: ' + intentName);
-                throw new Error(err);
-            }
-
-        } else if (event.request.type === 'SessionEndedRequest') {
-            onSessionEnded(event.request, event.session);
-            return callback();
-        }
-    } catch (err) {
-        return callback(err);
+function processAttrs(payload) {
+    const symbol = _.upperCase(_.result(payload, 'context.event.request.intent.slots.Symbol.value', _.result(payload, 'attrs.symbol', '')));
+    _.set(payload, 'attrs.symbol', symbol);
+    if (symbol) {
+        return Promise.resolve(payload);
+    } else {
+        return Promise.reject('no symbol specified');
     }
+}
 
-    return null;
+function getTimeSeriesFromAV(payload) {
+    const symbol = _.result(payload, 'attrs.symbol', false);
+    if (symbol) {
+        const url = `https://www.alphavantage.co/query`;
+        const params = {
+            function: 'TIME_SERIES_INTRADAY',
+            symbol,
+            interval: '1min',
+            apikey: secrets.keys.alphavantage
+        };
+        return request.get(url, {
+            params
+        }).then((res) => {
+            const timeseriesResponseData = res.data;
+            _.set(payload, 'data.timeseriesResponseData', timeseriesResponseData);
+            return payload;
+        }).catch((err) => {
+            console.error('@getTimeSeriesFromAV - request error:', err);
+            return payload;
+        });
+    } else {
+        console.error('@getTimeSeriesFromAV - error: symbol does not exist');
+        return Promise.resolve(payload);
+    }
+}
+
+function extractPrice(payload) {
+    const responseData = _.result(payload, 'data.timeseriesResponseData', false);
+    if (responseData) {
+        console.log('@extractPrice - response data:', responseData);
+        const timeseries = responseData[Object.keys(responseData)[1]];
+        const lastminute = timeseries[Object.keys(timeseries)[0]];
+        const closeprice = lastminute[Object.keys(lastminute)[3]];
+        _.set(payload, 'data.closeprice', closeprice);
+    } else {
+        console.error('@extractPrice - error: timeseries data does not exist');
+    }
+    return payload;
 }
