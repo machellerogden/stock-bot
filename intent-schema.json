@@ -1,0 +1,13 @@
+{
+  "intents": [
+    {
+      "slots": [
+        {
+          "name": "Symbol",
+          "type": "SYMBOL"
+        }
+      ],
+      "intent": "CurrentPriceFromSymbol"
+    }
+  ]
+}

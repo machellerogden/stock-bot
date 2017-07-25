@@ -1,0 +1,24 @@
+{
+  "name": "stock-bot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "./scripts/build.sh",
+    "deploy": "aws s3 cp stock-bot.zip s3://mho-alexa-skills/",
+    "ship": "npm run build && npm run deploy",
+    "lint": "./node_modules/.bin/eslint .",
+    "test": "./node_modules/.bin/lambda-local -l index.js -h handler -e ./test-events/*.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "0.16.0",
+    "bluebird": "^3.5.0",
+    "lodash": "^4.17.2"
+  },
+  "devDependencies": {
+    "eslint": "^3.12.0",
+    "lambda-local": "^1.4.2"
+  }
+}
