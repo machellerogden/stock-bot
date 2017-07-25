@@ -49,7 +49,7 @@ var handlers = {
                 const closeprice = _.result(payload, 'data.closeprice', false);
                 if (_.isFinite(+closeprice)) {
                     let price = Math.round(closeprice * 100) / 100;
-                    let symbol = _.result(payload, 'data.symbol');
+                    let symbol = _.result(payload, 'attrs.symbol');
                     let say = `Current price for <say-as interpret-as="spell-out">${symbol}</say-as> is \$${price}.`;
                     this.emit(':tell', say);
                 } else {
